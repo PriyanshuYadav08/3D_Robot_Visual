@@ -1,8 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("org.jetbrains.kotlin.kapt")
-    alias(libs.plugins.hilt.android)
+    alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.hilt)
 }
 
 android {
@@ -46,7 +46,6 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.2")
     implementation(libs.androidx.constraintlayout)
 
-    // Hilt dependencies using aliases from the version catalog
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
 
