@@ -9,6 +9,7 @@ import com.example.a3d_robot_visual.R
 import com.example.a3d_robot_visual.renderer.OpenGLRenderer
 import dagger.hilt.android.AndroidEntryPoint
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 @AndroidEntryPoint
 class RoomViewerFragment : Fragment(R.layout.fragment_room_viewer) {
@@ -25,16 +26,16 @@ class RoomViewerFragment : Fragment(R.layout.fragment_room_viewer) {
 
         glSurfaceView = view.findViewById(R.id.gl_surface_view)
 
-        // Request OpenGL ES 2.0
+        // OpenGL ES 2.0
         glSurfaceView.setEGLContextClientVersion(2)
 
-        // Request depth buffer (important for 3D)
+        // Request depth buffer
         glSurfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
 
-        renderer = OpenGLRenderer()
+        // ✅ CREATE RENDERER WITH SAFE CONTEXT
+        renderer = OpenGLRenderer(requireContext())
         glSurfaceView.setRenderer(renderer)
 
-        // Continuous rendering for smooth interaction
         glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
         // Touch handling
@@ -67,7 +68,10 @@ class RoomViewerFragment : Fragment(R.layout.fragment_room_viewer) {
         val x2 = event.getX(1)
         val y2 = event.getY(1)
 
-        val distance = distanceBetween(x1, y1, x2, y2)
+        val distance = sqrt(
+            (x1 - x2) * (x1 - x2) +
+                    (y1 - y2) * (y1 - y2)
+        )
 
         if (previousDistance != 0f) {
             val delta = distance - previousDistance
@@ -77,15 +81,6 @@ class RoomViewerFragment : Fragment(R.layout.fragment_room_viewer) {
         }
 
         previousDistance = distance
-    }
-
-    private fun distanceBetween(
-        x1: Float, y1: Float,
-        x2: Float, y2: Float
-    ): Float {
-        val dx = x1 - x2
-        val dy = y1 - y2
-        return kotlin.math.sqrt(dx * dx + dy * dy)
     }
 
     override fun onResume() {

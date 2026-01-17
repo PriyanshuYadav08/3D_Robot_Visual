@@ -1,120 +1,144 @@
 package com.example.a3d_robot_visual.renderer
 
+import android.content.Context
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.nio.ShortBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-class OpenGLRenderer : GLSurfaceView.Renderer {
+class OpenGLRenderer(
+    private val context: Context
+) : GLSurfaceView.Renderer {
 
-    // Camera controller
+    // Camera
     private val cameraController = CameraController()
 
     // Matrices
     private val projectionMatrix = FloatArray(16)
+    private val viewMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
 
-    // Triangle vertices (XYZ)
-    private val triangleCoords = floatArrayOf(
-        0.0f,  0.6f, 0.0f,
-        -0.5f, -0.3f, 0.0f,
-        0.5f, -0.3f, 0.0f
-    )
-
+    // Model buffers
     private lateinit var vertexBuffer: FloatBuffer
-    private var shaderProgram = 0
+    private lateinit var normalBuffer: FloatBuffer
+    private lateinit var indexBuffer: ShortBuffer
+    private var indexCount = 0
+
+    private var program = 0
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        // Background color (black)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
-
-        // Enable depth testing
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 
-        // Setup vertex buffer
-        vertexBuffer = ByteBuffer
-            .allocateDirect(triangleCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-            .apply {
-                put(triangleCoords)
-                position(0)
-            }
+        // ---- LOAD PLY MODEL ----
+        val model = PlyParser.loadFromAssets(context, "room_model.ply")
 
-        // Vertex shader
+        vertexBuffer = model.vertexBuffer
+        normalBuffer = model.normalBuffer
+        indexBuffer = model.indexBuffer
+        indexCount = model.indexCount
+
+        // ---- SHADERS ----
         val vertexShaderCode = """
             uniform mat4 uMVPMatrix;
+            uniform mat4 uViewMatrix;
             attribute vec4 aPosition;
+            attribute vec3 aNormal;
+            varying vec3 vNormal;
+
             void main() {
+                vNormal = mat3(uViewMatrix) * aNormal;
                 gl_Position = uMVPMatrix * aPosition;
             }
         """.trimIndent()
 
-        // Fragment shader
         val fragmentShaderCode = """
             precision mediump float;
+            varying vec3 vNormal;
+
             void main() {
-                gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+                vec3 lightDir = normalize(vec3(0.4, 1.0, 0.3));
+                float diff = max(dot(normalize(vNormal), lightDir), 0.0);
+                vec3 baseColor = vec3(0.7, 0.7, 0.7);
+                vec3 color = baseColor * diff + vec3(0.15);
+                gl_FragColor = vec4(color, 1.0);
             }
         """.trimIndent()
 
-        val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
-        val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
+        val vs = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
+        val fs = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode)
 
-        shaderProgram = GLES20.glCreateProgram().also { program ->
-            GLES20.glAttachShader(program, vertexShader)
-            GLES20.glAttachShader(program, fragmentShader)
-            GLES20.glLinkProgram(program)
+        program = GLES20.glCreateProgram().also {
+            GLES20.glAttachShader(it, vs)
+            GLES20.glAttachShader(it, fs)
+            GLES20.glLinkProgram(it)
         }
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
 
-        val aspectRatio = width.toFloat() / height.toFloat()
         Matrix.perspectiveM(
             projectionMatrix,
             0,
             60f,
-            aspectRatio,
+            width.toFloat() / height,
             0.1f,
-            100f
+            500f
         )
     }
 
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
-        val viewMatrix = cameraController.getViewMatrix()
+        val view = cameraController.getViewMatrix()
+        System.arraycopy(view, 0, viewMatrix, 0, 16)
+
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
 
-        GLES20.glUseProgram(shaderProgram)
+        GLES20.glUseProgram(program)
 
-        val positionHandle = GLES20.glGetAttribLocation(shaderProgram, "aPosition")
-        val mvpHandle = GLES20.glGetUniformLocation(shaderProgram, "uMVPMatrix")
+        val posHandle = GLES20.glGetAttribLocation(program, "aPosition")
+        val normalHandle = GLES20.glGetAttribLocation(program, "aNormal")
+        val mvpHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
+        val viewHandle = GLES20.glGetUniformLocation(program, "uViewMatrix")
 
-        GLES20.glEnableVertexAttribArray(positionHandle)
-
+        GLES20.glEnableVertexAttribArray(posHandle)
         GLES20.glVertexAttribPointer(
-            positionHandle,
+            posHandle,
             3,
             GLES20.GL_FLOAT,
             false,
-            3 * 4,
+            0,
             vertexBuffer
         )
 
+        GLES20.glEnableVertexAttribArray(normalHandle)
+        GLES20.glVertexAttribPointer(
+            normalHandle,
+            3,
+            GLES20.GL_FLOAT,
+            false,
+            0,
+            normalBuffer
+        )
+
         GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 3)
+        GLES20.glUniformMatrix4fv(viewHandle, 1, false, viewMatrix, 0)
 
-        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDrawElements(
+            GLES20.GL_TRIANGLES,
+            indexCount,
+            GLES20.GL_UNSIGNED_SHORT,
+            indexBuffer
+        )
+
+        GLES20.glDisableVertexAttribArray(posHandle)
+        GLES20.glDisableVertexAttribArray(normalHandle)
     }
-
-    // -------- Public API for touch interaction --------
 
     fun rotateCamera(dx: Float, dy: Float) {
         cameraController.rotate(dx, dy)
@@ -124,12 +148,10 @@ class OpenGLRenderer : GLSurfaceView.Renderer {
         cameraController.zoom(amount)
     }
 
-    // -------- Shader utility --------
-
-    private fun loadShader(type: Int, shaderCode: String): Int {
-        return GLES20.glCreateShader(type).also { shader ->
-            GLES20.glShaderSource(shader, shaderCode)
-            GLES20.glCompileShader(shader)
+    private fun loadShader(type: Int, code: String): Int {
+        return GLES20.glCreateShader(type).also {
+            GLES20.glShaderSource(it, code)
+            GLES20.glCompileShader(it)
         }
     }
 }
